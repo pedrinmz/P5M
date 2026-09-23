@@ -53,6 +53,13 @@ jobs:
 
       - name: Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # O padrao desta action pede "tools platform-tools" -- o pacote
+          # "tools" nao existe mais no repositorio do SDK (removido pelo
+          # Google ha anos) e o sdkmanager sai com erro so por causa dele.
+          # So platform-tools basta: o resto (NDK, CMake, plataforma,
+          # build-tools) o proximo passo instala explicitamente.
+          packages: platform-tools
 
       # O NDK sao mais de um giga que nao mudam entre builds. Baixar de novo a
       # cada push custava mais de meio minuto por build, e a chave e a lista de
