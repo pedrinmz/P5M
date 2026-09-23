@@ -99,6 +99,10 @@ def stubs_android():
     for m in chamados:
         if m.startswith("GetStringUTFChars"):
             metodos.append(f"\ttemplate<class...A> const char *{m}(A...) {{ return nullptr; }}")
+        elif m in ("GetMethodID", "GetStaticMethodID"):
+            metodos.append(f"\ttemplate<class...A> jmethodID {m}(A...) {{ return nullptr; }}")
+        elif m in ("GetFieldID", "GetStaticFieldID"):
+            metodos.append(f"\ttemplate<class...A> jfieldID {m}(A...) {{ return nullptr; }}")
         elif m.startswith(devolve_ponteiro) and not m.startswith(("GetArrayLength", "GetEnv")):
             metodos.append(f"\ttemplate<class...A> jobject {m}(A...) {{ return nullptr; }}")
         else:
@@ -218,6 +222,10 @@ template<class...A> inline int AndroidBitmap_unlockPixels(A...) { return 0; }
     for m in chamados:
         if m.startswith("GetStringUTFChars"):
             metodos.append(f"\ttemplate<class...A> const char *{m}(A...) {{ return nullptr; }}")
+        elif m in ("GetMethodID", "GetStaticMethodID"):
+            metodos.append(f"\ttemplate<class...A> jmethodID {m}(A...) {{ return nullptr; }}")
+        elif m in ("GetFieldID", "GetStaticFieldID"):
+            metodos.append(f"\ttemplate<class...A> jfieldID {m}(A...) {{ return nullptr; }}")
         elif m.startswith(devolve_ponteiro) and not m.startswith(("GetArrayLength", "GetEnv")):
             metodos.append(f"\ttemplate<class...A> jobject {m}(A...) {{ return nullptr; }}")
         else:
@@ -232,6 +240,8 @@ typedef short jshort; typedef double jdouble; typedef jint jsize;
 class _jobject {}; typedef _jobject *jobject; typedef jobject jclass;
 typedef jobject jstring; typedef jobject jarray; typedef jobject jobjectArray;
 typedef jobject jbyteArray; typedef jobject jfloatArray; typedef jobject jintArray;
+class _jmethodID {}; typedef _jmethodID *jmethodID;
+class _jfieldID {}; typedef _jfieldID *jfieldID;
 struct JNIEnv {
 __METODOS_JNI__
 };
