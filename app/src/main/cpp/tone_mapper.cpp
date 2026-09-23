@@ -896,7 +896,7 @@ bool ToneMapper::EnsureNeuralTargets()
 		if(!logged_neural_failure_)
 		{
 			logged_neural_failure_ = true;
-			LOGE("Incomplete framebuffer no downsample neural; 3D fica na heuristica");
+			LOGE("Incomplete framebuffer for the neural downsample; 3D falls back to the heuristic");
 		}
 		glDeleteTextures(1, &neural_down_tex_);
 		glDeleteFramebuffers(1, &neural_down_fbo_);
@@ -925,7 +925,7 @@ bool ToneMapper::EnsureNeuralTargets()
 	neural_rgba_buffer_.resize((size_t)w * h * 4);
 	neural_depth_buffer_.resize((size_t)w * h);
 	neural_targets_ready_ = true;
-	LOGI("Neural depth: downsample %dx%d pronto", w, h);
+	LOGI("Neural depth: downsample %dx%d ready", w, h);
 	return true;
 }
 

@@ -64,8 +64,8 @@ bool NeuralDepth::Init(void *asset_manager, const char *model_asset_path)
 #if !P5M_WITH_NEURAL_DEPTH
 	(void)asset_manager;
 	(void)model_asset_path;
-	LOGI("NeuralDepth: TFLite nao linkado neste build; 3D fica na estimativa "
-			"heuristica. Ver o comentario de topo em neural_depth.h.");
+	LOGI("NeuralDepth: TFLite not linked in this build; 3D falls back to the "
+			"heuristic estimate. See the top-of-file comment in neural_depth.h.");
 	return false;
 #else
 	// O modelo mora em assets/, entao precisa ser lido pelo AAssetManager em
@@ -75,14 +75,14 @@ bool NeuralDepth::Init(void *asset_manager, const char *model_asset_path)
 	AAsset *asset = AAssetManager_open(mgr, model_asset_path, AASSET_MODE_BUFFER);
 	if(!asset)
 	{
-		LOGE("NeuralDepth: modelo '%s' nao encontrado em assets/", model_asset_path);
+		LOGE("NeuralDepth: model '%s' not found in assets/", model_asset_path);
 		return false;
 	}
 	const off_t size = AAsset_getLength(asset);
 	const void *data = AAsset_getBuffer(asset);
 	if(!data || size <= 0)
 	{
-		LOGE("NeuralDepth: leitura de '%s' falhou", model_asset_path);
+		LOGE("NeuralDepth: read of '%s' failed", model_asset_path);
 		AAsset_close(asset);
 		return false;
 	}
@@ -94,7 +94,7 @@ bool NeuralDepth::Init(void *asset_manager, const char *model_asset_path)
 	AAsset_close(asset);
 	if(!impl_->model)
 	{
-		LOGE("NeuralDepth: TfLiteModelCreate falhou para '%s'", model_asset_path);
+		LOGE("NeuralDepth: TfLiteModelCreate failed for '%s'", model_asset_path);
 		delete impl_;
 		impl_ = nullptr;
 		return false;
@@ -115,12 +115,12 @@ bool NeuralDepth::Init(void *asset_manager, const char *model_asset_path)
 	if(impl_->gpu_delegate)
 		TfLiteInterpreterOptionsAddDelegate(impl_->options, impl_->gpu_delegate);
 	else
-		LOGI("NeuralDepth: delegate de GPU indisponivel, caindo para CPU");
+		LOGI("NeuralDepth: GPU delegate unavailable, falling back to CPU");
 
 	impl_->interpreter = TfLiteInterpreterCreate(impl_->model, impl_->options);
 	if(!impl_->interpreter || TfLiteInterpreterAllocateTensors(impl_->interpreter) != kTfLiteOk)
 	{
-		LOGE("NeuralDepth: falha ao criar/alocar o interpretador");
+		LOGE("NeuralDepth: failed to create/allocate the interpreter");
 		Destroy();
 		return false;
 	}
@@ -138,9 +138,9 @@ bool NeuralDepth::Init(void *asset_manager, const char *model_asset_path)
 			|| TfLiteTensorByteSize(in_tensor) != expected_in
 			|| TfLiteTensorByteSize(out_tensor_check) != expected_out)
 	{
-		LOGE("NeuralDepth: forma do tensor nao bate com %dx%d esperado "
-				"(entrada %zu bytes, esperado %zu; saida %zu, esperado %zu) -- "
-				"'%s' e o modelo certo?", kInputW, kInputH,
+		LOGE("NeuralDepth: tensor shape doesn't match the expected %dx%d "
+				"(input %zu bytes, expected %zu; output %zu, expected %zu) -- "
+				"is '%s' the right model?", kInputW, kInputH,
 				in_tensor ? TfLiteTensorByteSize(in_tensor) : 0, expected_in,
 				out_tensor_check ? TfLiteTensorByteSize(out_tensor_check) : 0, expected_out,
 				model_asset_path);
@@ -189,13 +189,13 @@ bool NeuralDepth::Init(void *asset_manager, const char *model_asset_path)
 			if(TfLiteTensorCopyFromBuffer(in_tensor, impl_->input_float.data(),
 					impl_->input_float.size() * sizeof(float)) != kTfLiteOk)
 			{
-				LOGE("NeuralDepth: TfLiteTensorCopyFromBuffer falhou");
+				LOGE("NeuralDepth: TfLiteTensorCopyFromBuffer failed");
 				continue;
 			}
 
 			if(TfLiteInterpreterInvoke(impl_->interpreter) != kTfLiteOk)
 			{
-				LOGE("NeuralDepth: TfLiteInterpreterInvoke falhou");
+				LOGE("NeuralDepth: TfLiteInterpreterInvoke failed");
 				continue;
 			}
 
@@ -211,7 +211,7 @@ bool NeuralDepth::Init(void *asset_manager, const char *model_asset_path)
 				float *raw = impl_->input_float.data();
 				if(TfLiteTensorCopyToBuffer(out_tensor, raw, (size_t)n * n * sizeof(float)) != kTfLiteOk)
 				{
-					LOGE("NeuralDepth: TfLiteTensorCopyToBuffer falhou");
+					LOGE("NeuralDepth: TfLiteTensorCopyToBuffer failed");
 					continue;
 				}
 
@@ -265,7 +265,7 @@ bool NeuralDepth::Init(void *asset_manager, const char *model_asset_path)
 	});
 
 	ready_ = true;
-	LOGI("NeuralDepth: pronto, entrada %dx%d, delegate %s", kInputW, kInputH,
+	LOGI("NeuralDepth: ready, input %dx%d, delegate %s", kInputW, kInputH,
 			impl_->gpu_delegate ? "GPU" : "CPU");
 	return true;
 #endif

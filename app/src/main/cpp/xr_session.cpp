@@ -118,7 +118,7 @@ bool XrVideoSession::Create(JavaVM *vm, jobject activity)
 		}
 		else
 		{
-			LOGW("getAssets() indisponivel; 3D neural fica desligado nesta sessao");
+			LOGW("getAssets() unavailable; neural 3D stays off for this session");
 		}
 	}
 
