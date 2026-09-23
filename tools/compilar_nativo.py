@@ -184,6 +184,22 @@ inline void ANativeWindow_release(ANativeWindow *) {}
 inline ANativeWindow *ANativeWindow_fromSurface(void *, void *) { return nullptr; }
 """)
     escrever("android/native_window_jni.h", "#pragma once\n#include <android/native_window.h>\n")
+    escrever("android/asset_manager.h", """#pragma once
+#include <cstddef>
+#include <sys/types.h>
+#define AASSET_MODE_UNKNOWN 0
+#define AASSET_MODE_RANDOM 1
+#define AASSET_MODE_STREAMING 2
+#define AASSET_MODE_BUFFER 3
+struct AAssetManager;
+struct AAsset;
+inline AAsset *AAssetManager_open(AAssetManager *, const char *, int) { return nullptr; }
+inline const void *AAsset_getBuffer(AAsset *) { return nullptr; }
+inline off_t AAsset_getLength(AAsset *) { return 0; }
+inline void AAsset_close(AAsset *) {}
+""")
+    escrever("android/asset_manager_jni.h", "#pragma once\n#include <android/asset_manager.h>\n"
+             "inline AAssetManager *AAssetManager_fromJava(void *, void *) { return nullptr; }\n")
     escrever("android/bitmap.h", """#pragma once
 #include <cstdint>
 #define ANDROID_BITMAP_RESULT_SUCCESS 0
