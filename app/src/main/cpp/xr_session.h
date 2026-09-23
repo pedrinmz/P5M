@@ -13,6 +13,7 @@
 
 #include <jni.h>
 #include "tone_mapper.h"
+#include "neural_depth.h"
 #include <atomic>
 #include <thread>
 #include <mutex>
@@ -390,6 +391,13 @@ private:
 	RenderPath render_path_ = RenderPath::Direct;
 	ToneMapper tone_mapper_;
 	bool tone_mapper_ready_ = false;
+	// Rede de profundidade neural, opcional -- ver o comentario de topo em
+	// neural_depth.h. Ligada ao ToneMapper via SetNeuralDepth() em Create(),
+	// se e so se NeuralDepth::Init() encontrar o modelo nos assets. Sem o
+	// modelo (ou sem o TFLite linkado no build), fica parada e o 3D usa a
+	// estimativa heuristica de sempre -- nada mais no resto do app precisa
+	// saber disso.
+	NeuralDepth neural_depth_;
 	// Fonte em PQ (10 bits) ou SDR (8). O shader trata os dois: com 8 bits so
 	// lineariza, sem mapear nada, para o caminho servir as duas profundidades.
 	std::atomic<bool> tone_map_pq_{true};

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 #include "tone_mapper.h"
 #include "log.h"
+#include "neural_depth.h"
 
 #include <cstring>
 #include <string>
@@ -64,6 +65,13 @@ uniform sampler2D uPrev;
 uniform int uHasPrev;
 uniform float uGroundSign;
 uniform float uConvergence;
+// Mapa de profundidade de uma rede neural externa (ver
+// ToneMapper::SetNeuralDepthTexture). Mesmo sentido da estimativa
+// heuristica: 1.0 e perto, 0.0 e longe. uUseNeural liga a fonte -- quando
+// esta em zero (sem rede pronta ainda, ou ela falhou) o shader cai para a
+// conta antiga, sem trocar mais nada no resto do pipeline.
+uniform sampler2D uNeuralDepth;
+uniform int uUseNeural;
 
 in vec2 vUv;
 in vec2 vDx;
@@ -74,51 +82,66 @@ out vec4 fragColor;
 void main()
 {
 	vec3 c = texture(uTexture, vUv).rgb;
-
-	// Amostras largas: e nelas que moram as pistas de cena -- textura contra
-	// neblina, cor viva contra cor lavada. Espalhadas de proposito, porque mapa
-	// de profundidade com borda dura produz halo em volta de tudo.
-	vec3 n = texture(uTexture, vUv - vDy * 8.0).rgb;
-	vec3 s = texture(uTexture, vUv + vDy * 8.0).rgb;
-	vec3 w = texture(uTexture, vUv - vDx * 8.0).rgb;
-	vec3 e = texture(uTexture, vUv + vDx * 8.0).rgb;
-
+	// Usada tanto na estimativa heuristica quanto na pista fina de texto, mais
+	// abaixo -- por isso vive fora dos dois ramos.
 	const vec3 media = vec3(0.3333);
-	float detalhe = clamp((abs(dot(n - c, media)) + abs(dot(s - c, media))
-			+ abs(dot(w - c, media)) + abs(dot(e - c, media))) * 2.0, 0.0, 1.0);
 
-	float mx = max(max(c.r, c.g), c.b);
-	float mn = min(min(c.r, c.g), c.b);
-	float sat = (mx - mn) / max(mx, 1e-4);
+	float d;
+	if(uUseNeural == 1)
+	{
+		// A rede ja devolve profundidade por pixel; nao ha o que uma pista de
+		// borda ou de chao acrescentar aqui. O endereco e vUv, o mesmo espaco
+		// da fonte de video, entao o mapa da rede e amostrado na mesma
+		// coordenada que a passada heuristica amostrava -- quem gerou a
+		// textura e responsavel por ter desenhado nela nesse espaco.
+		d = texture(uNeuralDepth, vUv).r;
+	}
+	else
+	{
+		// Amostras largas: e nelas que moram as pistas de cena -- textura contra
+		// neblina, cor viva contra cor lavada. Espalhadas de proposito, porque mapa
+		// de profundidade com borda dura produz halo em volta de tudo.
+		vec3 n = texture(uTexture, vUv - vDy * 8.0).rgb;
+		vec3 s = texture(uTexture, vUv + vDy * 8.0).rgb;
+		vec3 w = texture(uTexture, vUv - vDx * 8.0).rgb;
+		vec3 e = texture(uTexture, vUv + vDx * 8.0).rgb;
 
-	float chao = clamp(uGroundSign > 0.0 ? 1.0 - vScreen.y : vScreen.y, 0.0, 1.0);
+		float detalhe = clamp((abs(dot(n - c, media)) + abs(dot(s - c, media))
+				+ abs(dot(w - c, media)) + abs(dot(e - c, media))) * 2.0, 0.0, 1.0);
 
-	// A pista de detalhe pesa menos do que pesava.
-	//
-	// Ela empurra para perto o que tem alta frequencia, e texto e a coisa de
-	// maior frequencia que existe num quadro -- entao legenda e HUD saltavam
-	// para a frente, separados do fundo. Foi o defeito relatado no primeiro
-	// teste, e "o texto fica estranho" e exatamente o que essa pista causa.
-	//
-	// A rampa do chao pesa conforme haja chao.
-	//
-	// Ela e a pista mais forte -- "o que esta embaixo da tela esta perto" --, e
-	// numa cena de terceira pessoa com o piso enquadrado ela acerta quase
-	// sozinha. Numa parede, num close ou num menu de tela cheia nao ha chao
-	// nenhum, e ela continuava impondo a mesma inclinacao global: a imagem
-	// inteira tombava para tras sem que nada na cena pedisse.
-	//
-	// O que distingue os dois casos e gradiente vertical. Um piso que se afasta
-	// clareia ou escurece de baixo para cima; uma parede chapada, uma cara em
-	// close e um fundo de menu nao. Onde nao ha essa variacao a rampa recua
-	// para menos da metade da autoridade e as outras duas pistas ficam com o que
-	// ela devolveu -- na mesma proporcao entre si, que ja foi ajustada e nao e o
-	// que esta em teste aqui.
-	float grad_v = abs(dot(s - n, media));
-	float peso_chao = mix(0.25, 0.60, smoothstep(0.010, 0.075, grad_v));
-	float resto = 1.0 - peso_chao;
-	float d = clamp(peso_chao * chao + resto * (0.375 * detalhe + 0.625 * sat),
-			0.0, 1.0);
+		float mx = max(max(c.r, c.g), c.b);
+		float mn = min(min(c.r, c.g), c.b);
+		float sat = (mx - mn) / max(mx, 1e-4);
+
+		float chao = clamp(uGroundSign > 0.0 ? 1.0 - vScreen.y : vScreen.y, 0.0, 1.0);
+
+		// A pista de detalhe pesa menos do que pesava.
+		//
+		// Ela empurra para perto o que tem alta frequencia, e texto e a coisa de
+		// maior frequencia que existe num quadro -- entao legenda e HUD saltavam
+		// para a frente, separados do fundo. Foi o defeito relatado no primeiro
+		// teste, e "o texto fica estranho" e exatamente o que essa pista causa.
+		//
+		// A rampa do chao pesa conforme haja chao.
+		//
+		// Ela e a pista mais forte -- "o que esta embaixo da tela esta perto" --, e
+		// numa cena de terceira pessoa com o piso enquadrado ela acerta quase
+		// sozinha. Numa parede, num close ou num menu de tela cheia nao ha chao
+		// nenhum, e ela continuava impondo a mesma inclinacao global: a imagem
+		// inteira tombava para tras sem que nada na cena pedisse.
+		//
+		// O que distingue os dois casos e gradiente vertical. Um piso que se afasta
+		// clareia ou escurece de baixo para cima; uma parede chapada, uma cara em
+		// close e um fundo de menu nao. Onde nao ha essa variacao a rampa recua
+		// para menos da metade da autoridade e as outras duas pistas ficam com o que
+		// ela devolveu -- na mesma proporcao entre si, que ja foi ajustada e nao e o
+		// que esta em teste aqui.
+		float grad_v = abs(dot(s - n, media));
+		float peso_chao = mix(0.25, 0.60, smoothstep(0.010, 0.075, grad_v));
+		float resto = 1.0 - peso_chao;
+		d = clamp(peso_chao * chao + resto * (0.375 * detalhe + 0.625 * sat),
+				0.0, 1.0);
+	}
 
 	// Contraste em escala fina, de um texel: e o que separa texto de textura.
 	// Parede de tijolo tem detalhe largo; letra tem borda dura de um pixel para
@@ -164,6 +187,25 @@ void main()
 	}
 
 	fragColor = vec4(clamp(d, 0.0, 1.0), luma, 0.0, 1.0);
+}
+)";
+
+// Downsample puro para a entrada da rede neural: sem nenhuma das pistas
+// heuristicas, so a fonte redimensionada para kInputW x kInputH (ver
+// neural_depth.h). Reaproveita o mesmo kVertexShader -- a transformacao da
+// SurfaceTexture e a mesma, so o alvo muda de tamanho.
+const char *kNeuralDownsampleShader = R"(#version 300 es
+#extension GL_OES_EGL_image_external_essl3 : require
+precision highp float;
+
+uniform samplerExternalOES uTexture;
+
+in vec2 vUv;
+out vec4 fragColor;
+
+void main()
+{
+	fragColor = vec4(texture(uTexture, vUv).rgb, 1.0);
 }
 )";
 
@@ -470,12 +512,44 @@ bool ToneMapper::CompileProgram()
 			dloc_has_prev_ = glGetUniformLocation(depth_program_, "uHasPrev");
 			dloc_ground_sign_ = glGetUniformLocation(depth_program_, "uGroundSign");
 			dloc_convergence_ = glGetUniformLocation(depth_program_, "uConvergence");
+			dloc_neural_sampler_ = glGetUniformLocation(depth_program_, "uNeuralDepth");
+			dloc_use_neural_ = glGetUniformLocation(depth_program_, "uUseNeural");
 		}
 	}
 	if(dvs)
 		glDeleteShader(dvs);
 	if(dfs)
 		glDeleteShader(dfs);
+
+	// O programa de downsample para a rede neural. Falhar aqui tambem nao
+	// derruba nada -- so significa que SetNeuralDepth() nunca vai ter como
+	// alimentar a fila de inferencia, e o 3D fica na estimativa heuristica.
+	GLuint nvs = CompileShader(GL_VERTEX_SHADER, kVertexShader);
+	GLuint nfs = nvs ? CompileShader(GL_FRAGMENT_SHADER, kNeuralDownsampleShader) : 0;
+	if(nvs && nfs)
+	{
+		neural_down_program_ = glCreateProgram();
+		glAttachShader(neural_down_program_, nvs);
+		glAttachShader(neural_down_program_, nfs);
+		glBindAttribLocation(neural_down_program_, 0, "aPos");
+		glLinkProgram(neural_down_program_);
+		GLint nok = GL_FALSE;
+		glGetProgramiv(neural_down_program_, GL_LINK_STATUS, &nok);
+		if(nok != GL_TRUE)
+		{
+			glDeleteProgram(neural_down_program_);
+			neural_down_program_ = 0;
+		}
+		else
+		{
+			ndloc_tex_matrix_ = glGetUniformLocation(neural_down_program_, "uTexMatrix");
+			ndloc_sampler_ = glGetUniformLocation(neural_down_program_, "uTexture");
+		}
+	}
+	if(nvs)
+		glDeleteShader(nvs);
+	if(nfs)
+		glDeleteShader(nfs);
 	return true;
 }
 
@@ -784,6 +858,144 @@ bool ToneMapper::EnsureDepthTargets(int32_t width, int32_t height)
 	return true;
 }
 
+/**
+ * Cria o FBO/textura de downsample (tamanho de entrada da rede) e as duas
+ * texturas de resultado, na primeira vez que ha um NeuralDepth ligado.
+ *
+ * Chamada de dentro de UpdateNeuralDepth(); nao ha motivo para redimensionar
+ * depois -- o tamanho de entrada da rede e fixo (NeuralDepth::kInputW/H),
+ * ao contrario do EnsureDepthTargets() que acompanha a resolucao do video.
+ */
+bool ToneMapper::EnsureNeuralTargets()
+{
+	if(neural_targets_ready_)
+		return true;
+	if(neural_down_program_ == 0)
+		return false;
+
+	const int32_t w = NeuralDepth::kInputW;
+	const int32_t h = NeuralDepth::kInputH;
+
+	glGenFramebuffers(1, &neural_down_fbo_);
+	glGenTextures(1, &neural_down_tex_);
+	glBindTexture(GL_TEXTURE_2D, neural_down_tex_);
+	glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGBA8, w, h);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glBindTexture(GL_TEXTURE_2D, 0);
+
+	glBindFramebuffer(GL_FRAMEBUFFER, neural_down_fbo_);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
+			neural_down_tex_, 0);
+	const bool ok = glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	if(!ok)
+	{
+		if(!logged_neural_failure_)
+		{
+			logged_neural_failure_ = true;
+			LOGE("Incomplete framebuffer no downsample neural; 3D fica na heuristica");
+		}
+		glDeleteTextures(1, &neural_down_tex_);
+		glDeleteFramebuffers(1, &neural_down_fbo_);
+		neural_down_tex_ = neural_down_fbo_ = 0;
+		return false;
+	}
+
+	// GL_R8, e nao um formato de ponto flutuante: assim a leitura linear no
+	// kDepthShader (uNeuralDepth) funciona em qualquer aparelho ES 3.0 sem
+	// depender de OES_texture_float_linear, que nem todo driver tem. O custo
+	// e a quantizacao de 8 bits na profundidade -- imperceptivel aqui, porque
+	// o mapa inteiro ja passa por uma media exponencial e por um alvo de 1/4
+	// de resolucao antes de chegar a tela.
+	glGenTextures(2, neural_result_tex_);
+	for(int i = 0; i < 2; i++)
+	{
+		glBindTexture(GL_TEXTURE_2D, neural_result_tex_[i]);
+		glTexStorage2D(GL_TEXTURE_2D, 1, GL_R8, w, h);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	}
+	glBindTexture(GL_TEXTURE_2D, 0);
+
+	neural_rgba_buffer_.resize((size_t)w * h * 4);
+	neural_depth_buffer_.resize((size_t)w * h);
+	neural_targets_ready_ = true;
+	LOGI("Neural depth: downsample %dx%d pronto", w, h);
+	return true;
+}
+
+/**
+ * Downsample -> entrega para a fila de inferencia -> recolhe resultado
+ * pronto (se houver) -> sobe para a GPU. Chamada de dentro de Render(), so em
+ * quadro novo e com o 3D ligado -- mesma condicao do RenderDepth() heuristico,
+ * porque e o mesmo caso de uso: nao ha por que gerar profundidade, neural ou
+ * heuristica, de um quadro que nao vai ser mostrado com 3D nenhum.
+ */
+void ToneMapper::UpdateNeuralDepth(const float *matrix, int32_t width, int32_t height)
+{
+	if(!neural_depth_ || !neural_depth_->ready())
+		return;
+	if(!EnsureNeuralTargets())
+		return;
+
+	const int32_t w = NeuralDepth::kInputW;
+	const int32_t h = NeuralDepth::kInputH;
+
+	// 1) Downsample da fonte para o tamanho da rede.
+	glBindFramebuffer(GL_FRAMEBUFFER, neural_down_fbo_);
+	glViewport(0, 0, w, h);
+	glDisable(GL_BLEND);
+	glDisable(GL_DEPTH_TEST);
+	glDisable(GL_CULL_FACE);
+	glUseProgram(neural_down_program_);
+	glUniformMatrix4fv(ndloc_tex_matrix_, 1, GL_FALSE, matrix);
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_EXTERNAL_OES, external_tex_);
+	glUniform1i(ndloc_sampler_, 0);
+	glBindVertexArray(vao_);
+	glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+	glBindVertexArray(0);
+
+	// 2) Volta para a CPU. Preco conhecido e assumido (ver o comentario de
+	// topo em neural_depth.h): e a versao "simples", nao a que evita a copia.
+	glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, neural_rgba_buffer_.data());
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+	// 3) Entrega o quadro para a thread de inferencia. Nao bloqueia.
+	neural_depth_->SubmitFrame(neural_rgba_buffer_.data());
+
+	// 4) Ha resultado pronto de uma entrega anterior? Sobe para a textura que
+	// nao esta em uso pelo quadro que acabou de ser desenhado.
+	if(neural_depth_->PollResult(neural_depth_buffer_.data()))
+	{
+		// Float [0,1] -> byte, para o GL_R8 do passo (5) do EnsureNeuralTargets.
+		// Reaproveita o mesmo buffer de RGBA (4x maior que o necessario) como
+		// area de conversao, para nao alocar mais um vetor por quadro.
+		uint8_t *bytes = neural_rgba_buffer_.data();
+		for(size_t i = 0; i < neural_depth_buffer_.size(); i++)
+		{
+			float v = neural_depth_buffer_[i];
+			bytes[i] = (uint8_t)(v <= 0.0f ? 0 : (v >= 1.0f ? 255 : v * 255.0f + 0.5f));
+		}
+		const int destino = 1 - neural_result_newest_;
+		glBindTexture(GL_TEXTURE_2D, neural_result_tex_[destino]);
+		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, w, h, GL_RED, GL_UNSIGNED_BYTE, bytes);
+		glBindTexture(GL_TEXTURE_2D, 0);
+		neural_result_newest_ = destino;
+		SetNeuralDepthTexture(neural_result_tex_[destino], true);
+	}
+	// Sem resultado novo: mantem o SetNeuralDepthTexture do quadro anterior --
+	// nao ha nada melhor para mostrar, e cair para a heuristica so porque a
+	// rede ainda nao respondeu produziria uma cintilacao entre as duas fontes
+	// pior do que mostrar um quadro de profundidade neural com um par de
+	// quadros de atraso.
+}
+
 /** Desenha o mapa de profundidade do quadro, no alvo pequeno. */
 void ToneMapper::RenderDepth(const float *matrix, int32_t width, int32_t height)
 {
@@ -828,6 +1040,20 @@ void ToneMapper::RenderDepth(const float *matrix, int32_t width, int32_t height)
 	glActiveTexture(GL_TEXTURE1);
 	glBindTexture(GL_TEXTURE_2D, depth_tex_[depth_newest_]);
 	glUniform1i(dloc_prev_, 1);
+
+	// Terceiro sampler: o mapa da rede neural, quando ha um pronto. Ligar o
+	// mesmo dummy_tex_ que o Render() principal usa quando neural_depth_tex_
+	// e zero evitaria um sampler sem textura, mas aqui isso nao e necessario
+	// -- o uUseNeural em zero faz o shader nem tocar em uNeuralDepth, entao
+	// nao ha leitura de um sampler incompleto para o driver reclamar.
+	const bool usar_neural = neural_depth_valid_ && neural_depth_tex_ != 0;
+	if(usar_neural)
+	{
+		glActiveTexture(GL_TEXTURE2);
+		glBindTexture(GL_TEXTURE_2D, neural_depth_tex_);
+		glUniform1i(dloc_neural_sampler_, 2);
+	}
+	glUniform1i(dloc_use_neural_, usar_neural ? 1 : 0);
 
 	glBindVertexArray(vao_);
 	glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
@@ -906,7 +1132,10 @@ bool ToneMapper::Render(GLuint target, int32_t width, int32_t height, bool pq,
 	// pretendida. Alem de custar uma passada de GPU justamente nos quadros que
 	// a extrapolacao existe para baratear.
 	if(stereo_ && fresh)
+	{
+		UpdateNeuralDepth(matrix, width, height);
 		RenderDepth(matrix, width, height);
+	}
 
 	if(stereo_ && target_right != 0)
 	{
@@ -1260,6 +1489,25 @@ void ToneMapper::Destroy()
 	if(depth_program_ != 0)
 		glDeleteProgram(depth_program_);
 	depth_program_ = 0;
+
+	if(neural_down_fbo_ != 0)
+		glDeleteFramebuffers(1, &neural_down_fbo_);
+	if(neural_down_tex_ != 0)
+		glDeleteTextures(1, &neural_down_tex_);
+	if(neural_result_tex_[0] != 0)
+		glDeleteTextures(2, neural_result_tex_);
+	neural_down_fbo_ = neural_down_tex_ = 0;
+	neural_result_tex_[0] = neural_result_tex_[1] = 0;
+	neural_result_newest_ = 0;
+	neural_targets_ready_ = false;
+	if(neural_down_program_ != 0)
+		glDeleteProgram(neural_down_program_);
+	neural_down_program_ = 0;
+	// neural_depth_ nao e nosso -- so o ponteiro e esquecido, o objeto quem
+	// deu (a sessao XR) que destroi.
+	neural_depth_ = nullptr;
+	neural_depth_tex_ = 0;
+	neural_depth_valid_ = false;
 
 	if(external_tex_ != 0)
 		glDeleteTextures(1, &external_tex_);

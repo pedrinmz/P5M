@@ -21,8 +21,14 @@
 // GL_TEXTURE_EXTERNAL_OES e extensao OES: nao esta no gl3.h.
 #include <GLES2/gl2ext.h>
 #include <stdint.h>
+#include <vector>
 
 namespace p5m {
+
+// So a declaracao: o ToneMapper guarda um ponteiro, nao e dono do objeto.
+// Quem cria e destroi o NeuralDepth (e decide se ele existe, dado que precisa
+// do AAssetManager) e a sessao XR -- ver xr_session.h/.cpp.
+class NeuralDepth;
 
 class ToneMapper
 {
@@ -101,6 +107,46 @@ public:
 	/** Nits em que o branco de referência do SDR é mapeado. */
 	void SetTargetNits(float nits) { target_nits_ = nits; }
 
+	/**
+	 * Entrega o mapa de profundidade produzido por uma rede neural externa
+	 * (por exemplo, uma thread de inferência TFLite/QNN rodando em paralelo).
+	 *
+	 * `tex` é uma textura 2D comum (GL_TEXTURE_2D), R de um canal, com o valor
+	 * de profundidade normalizado em [0, 1] -- perto = 1, longe = 0, no mesmo
+	 * sentido que a estimativa heurística já usava. O passo aqui é só trocar o
+	 * ponteiro: o comentário no kDepthShader já previa que um dia isto viria
+	 * de uma rede, e o alvo que ela preenche é este.
+	 *
+	 * `valid` diz se a textura tem um quadro utilizável dentro. Falso faz o
+	 * shader da profundidade cair de volta na estimativa heurística -- é o
+	 * caso do primeiro quadro, antes da rede terminar a primeira inferência,
+	 * ou de qualquer falha no lado da inferência. O 3D nunca fica sem mapa por
+	 * causa disso.
+	 *
+	 * Chamar antes do Render() do mesmo quadro. A textura não é copiada nem
+	 * liberada por este objeto -- quem chama continua dono dela.
+	 */
+	void SetNeuralDepthTexture(GLuint tex, bool valid)
+	{
+		neural_depth_tex_ = tex;
+		neural_depth_valid_ = valid;
+	}
+
+	/**
+	 * Liga a fonte de profundidade neural.
+	 *
+	 * Passar nullptr (o padrao) mantem o 3D inteiramente na estimativa
+	 * heuristica -- e o unico efeito de nao chamar isto. Passado um objeto ja
+	 * inicializado (NeuralDepth::Init() == true), toda passada de profundidade
+	 * em quadro novo (Render() com stereo_ ligado e fresh) faz tres coisas na
+	 * ordem: baixa a imagem da fonte para o tamanho de entrada da rede,
+	 * entrega para a fila de inferencia, e pergunta se ha um resultado pronto
+	 * de uma entrega anterior para subir de volta a GPU antes do
+	 * RenderDepth(). O objeto continua de quem chamou -- este ponteiro nao e
+	 * destruido em Destroy().
+	 */
+	void SetNeuralDepth(NeuralDepth *neural) { neural_depth_ = neural; }
+
 private:
 	bool CompileProgram();
 	bool EnsureHistory(int32_t width, int32_t height, int slot);
@@ -171,6 +217,39 @@ private:
 	GLint dloc_has_prev_ = -1;
 	GLint dloc_ground_sign_ = -1;
 	GLint dloc_convergence_ = -1;
+	GLint dloc_neural_sampler_ = -1;
+	GLint dloc_use_neural_ = -1;
+
+	// Textura de profundidade vinda de fora (rede neural). Não pertence a este
+	// objeto -- ver SetNeuralDepthTexture(). Zero ou neural_depth_valid_ falso
+	// faz a passada da profundidade usar a estimativa heurística de sempre.
+	GLuint neural_depth_tex_ = 0;
+	bool neural_depth_valid_ = false;
+
+	// -- Ponte para a inferencia neural, dentro da propria passada de
+	// profundidade (ver o comentario de SetNeuralDepth) ------------------
+	NeuralDepth *neural_depth_ = nullptr;
+	void UpdateNeuralDepth(const float *matrix, int32_t width, int32_t height);
+	bool EnsureNeuralTargets();
+
+	// Downsample: um FBO so, do tamanho de entrada da rede, onde a fonte e
+	// desenhada antes do glReadPixels que alimenta a fila de inferencia.
+	GLuint neural_down_fbo_ = 0;
+	GLuint neural_down_tex_ = 0;
+	GLuint neural_down_program_ = 0;
+	GLint ndloc_tex_matrix_ = -1;
+	GLint ndloc_sampler_ = -1;
+
+	// Resultado da rede, em rodizio de duas texturas pela mesma razao do
+	// depth_tex_: escrever na que nao esta em uso evita o driver ter de
+	// esperar o consumidor da passada anterior soltar a textura.
+	GLuint neural_result_tex_[2] = {0, 0};
+	int neural_result_newest_ = 0;
+	bool neural_targets_ready_ = false;
+	bool logged_neural_failure_ = false;
+
+	std::vector<uint8_t> neural_rgba_buffer_;
+	std::vector<float> neural_depth_buffer_;
 
 	bool EnsureDepthTargets(int32_t width, int32_t height);
 	void RenderDepth(const float *matrix, int32_t width, int32_t height);

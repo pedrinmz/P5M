@@ -24,8 +24,16 @@ def applyChiakiPatches = tasks.register('applyChiakiPatches') {
         def patchDir = file("$rootDir/patches")
         if (!patchDir.exists()) return
         patchDir.listFiles().findAll { it.name.endsWith('.patch') }.sort().each { patch ->
+            // --ignore-whitespace: o patch e gerado em LF: se o checkout do
+            // submodulo vier em CRLF (comum no Windows, por config local ou
+            // por .gitattributes do proprio chiaki-ng), a diferenca e so o \r
+            // no fim de cada linha -- nao conteudo de verdade. Sem esta flag,
+            // git apply recusa o patch inteiro por essa diferenca cosmetica;
+            // com ela, aplica normalmente e o arquivo no disco continua como
+            // estava (CRLF ou LF, o que ja fosse), so o texto novo entra.
             def alreadyApplied = providers.exec {
-                commandLine 'git', '-C', chiakiNg.absolutePath, 'apply', '--check', '--reverse', patch.absolutePath
+                commandLine 'git', '-C', chiakiNg.absolutePath, 'apply', '--check',
+                        '--reverse', '--ignore-whitespace', patch.absolutePath
                 ignoreExitValue = true
             }.result.get().exitValue == 0
             if (alreadyApplied) {
@@ -33,7 +41,8 @@ def applyChiakiPatches = tasks.register('applyChiakiPatches') {
                 return
             }
             def result = providers.exec {
-                commandLine 'git', '-C', chiakiNg.absolutePath, 'apply', patch.absolutePath
+                commandLine 'git', '-C', chiakiNg.absolutePath, 'apply',
+                        '--ignore-whitespace', patch.absolutePath
                 ignoreExitValue = true
             }.result.get()
             if (result.exitValue != 0) {
@@ -164,6 +173,13 @@ tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
     dependsOn applyChiakiPatches
     kotlinOptions {
         freeCompilerArgs += "-opt-in=kotlin.ExperimentalUnsignedTypes"
+        // O bloco kotlinOptions { jvmTarget = "1.8" } dentro de "android {}",
+        // mais acima, cobre a compilacao normal do Kotlin -- mas nao chega na
+        // tarefa de geracao de stubs do kapt (kaptGenerateStubsDebugKotlin),
+        // que e um KotlinCompile a parte e cai no alvo do JDK do Studio (17)
+        // se nao for dito o contrario aqui. Repetido explicitamente para
+        // bater com sourceCompatibility/targetCompatibility, la em cima.
+        jvmTarget = "1.8"
     }
 }
 tasks.matching { it.name.startsWith('kapt') }.configureEach {
@@ -216,4 +232,8 @@ dependencies {
     // de API escondida. A isencao instalada em DualSenseHid nomeia tres
     // classes, e nao abre a lista inteira.
     implementation "org.lsposed.hiddenapibypass:hiddenapibypass:6.1"
+
+    // 3D por profundidade neural (ver docs/3D-NEURAL-INTEGRACAO.md).
+    implementation "org.tensorflow:tensorflow-lite:2.16.1"
+    implementation "org.tensorflow:tensorflow-lite-gpu:2.16.1"
 }

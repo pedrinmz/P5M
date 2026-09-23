@@ -3,6 +3,7 @@
 #include "spatializer.h"
 #include "log.h"
 
+#include <android/asset_manager_jni.h>
 #include <chrono>
 #include <algorithm>
 #include <cmath>
@@ -98,6 +99,28 @@ bool XrVideoSession::Create(JavaVM *vm, jobject activity)
 		return false;
 	}
 	activity_ = env->NewGlobalRef(activity);
+
+	// Rede de profundidade neural: opcional, e falha em silencio (o proprio
+	// Init() ja loga o motivo). O modelo (MiDaS v2.1 small, 256x256, fp16) ja
+	// vem em app/src/main/assets/ -- veio pronto do projeto moonlight-android-xr,
+	// nao precisou de conversao propria. Ver docs/3D-NEURAL-INTEGRACAO.md.
+	{
+		jclass activity_class = env->GetObjectClass(activity_);
+		jmethodID get_assets = env->GetMethodID(activity_class, "getAssets",
+				"()Landroid/content/res/AssetManager;");
+		jobject assets_obj = get_assets ? env->CallObjectMethod(activity_, get_assets)
+				: nullptr;
+		if(assets_obj)
+		{
+			AAssetManager *mgr = AAssetManager_fromJava(env, assets_obj);
+			if(mgr && neural_depth_.Init(mgr, "midas_v21_small_256_fp16.tflite"))
+				tone_mapper_.SetNeuralDepth(&neural_depth_);
+		}
+		else
+		{
+			LOGW("getAssets() indisponivel; 3D neural fica desligado nesta sessao");
+		}
+	}
 
 	// No Android o loader precisa da VM e do Context antes de qualquer outra
 	// chamada OpenXR, senao nao localiza o runtime do Horizon OS.
@@ -2390,6 +2413,10 @@ void XrVideoSession::Destroy()
 
 	tone_mapper_.Destroy();
 	tone_mapper_ready_ = false;
+	// Depois do ToneMapper: ele so guarda um ponteiro para isto (ver
+	// SetNeuralDepth), entao a ordem aqui nao evita nenhum uso indevido -- e
+	// so simetria com quem criou primeiro sendo destruido depois.
+	neural_depth_.Destroy();
 	video_images_.clear();
 	video_images_right_.clear();
 	pending_gl_width_ = 0;
