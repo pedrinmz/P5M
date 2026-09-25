@@ -232,8 +232,4 @@ dependencies {
     // de API escondida. A isencao instalada em DualSenseHid nomeia tres
     // classes, e nao abre a lista inteira.
     implementation "org.lsposed.hiddenapibypass:hiddenapibypass:6.1"
-
-    // 3D por profundidade neural (ver docs/3D-NEURAL-INTEGRACAO.md).
-    implementation "org.tensorflow:tensorflow-lite:2.16.1"
-    implementation "org.tensorflow:tensorflow-lite-gpu:2.16.1"
 }

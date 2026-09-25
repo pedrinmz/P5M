@@ -87,6 +87,33 @@ void main()
 	const vec3 media = vec3(0.3333);
 
 	float d;
+
+	// Amostras largas: e nelas que moram as pistas de cena -- textura contra
+	// neblina, cor viva contra cor lavada. Espalhadas de proposito, porque mapa
+	// de profundidade com borda dura produz halo em volta de tudo.
+	//
+	// Duas distancias (6 e 10 texels), nao uma: um unico raio pega em cheio
+	// blocos de compressao do video, que mudam de um quadro pro outro sem a
+	// cena ter mudado nada -- e isso e o "ruido" que fica piscando no mapa de
+	// profundidade mesmo com a cena parada. Duas distancias medias diferentes
+	// e ja uma media de duas leituras, o que sozinho corta bastante desse
+	// tremor, sem esconder borda de verdade (que aparece nas duas).
+	vec3 n1 = texture(uTexture, vUv - vDy * 6.0).rgb;
+	vec3 s1 = texture(uTexture, vUv + vDy * 6.0).rgb;
+	vec3 w1 = texture(uTexture, vUv - vDx * 6.0).rgb;
+	vec3 e1 = texture(uTexture, vUv + vDx * 6.0).rgb;
+	vec3 n2 = texture(uTexture, vUv - vDy * 10.0).rgb;
+	vec3 s2 = texture(uTexture, vUv + vDy * 10.0).rgb;
+	vec3 w2 = texture(uTexture, vUv - vDx * 10.0).rgb;
+	vec3 e2 = texture(uTexture, vUv + vDx * 10.0).rgb;
+	vec3 n = (n1 + n2) * 0.5, s = (s1 + s2) * 0.5, w = (w1 + w2) * 0.5, e = (e1 + e2) * 0.5;
+
+	// Usada na estimativa heuristica, na pista de "e uma mancha isolada" (mais
+	// abaixo) e, se um dia a rede tambem quiser, disponivel do mesmo jeito --
+	// por isso calculada aqui fora, antes da bifurcacao, e nao dentro do else.
+	float detalhe = clamp((abs(dot(n - c, media)) + abs(dot(s - c, media))
+			+ abs(dot(w - c, media)) + abs(dot(e - c, media))) * 2.0, 0.0, 1.0);
+
 	if(uUseNeural == 1)
 	{
 		// A rede ja devolve profundidade por pixel; nao ha o que uma pista de
@@ -98,17 +125,6 @@ void main()
 	}
 	else
 	{
-		// Amostras largas: e nelas que moram as pistas de cena -- textura contra
-		// neblina, cor viva contra cor lavada. Espalhadas de proposito, porque mapa
-		// de profundidade com borda dura produz halo em volta de tudo.
-		vec3 n = texture(uTexture, vUv - vDy * 8.0).rgb;
-		vec3 s = texture(uTexture, vUv + vDy * 8.0).rgb;
-		vec3 w = texture(uTexture, vUv - vDx * 8.0).rgb;
-		vec3 e = texture(uTexture, vUv + vDx * 8.0).rgb;
-
-		float detalhe = clamp((abs(dot(n - c, media)) + abs(dot(s - c, media))
-				+ abs(dot(w - c, media)) + abs(dot(e - c, media))) * 2.0, 0.0, 1.0);
-
 		float mx = max(max(c.r, c.g), c.b);
 		float mn = min(min(c.r, c.g), c.b);
 		float sat = (mx - mn) / max(mx, 1e-4);
@@ -166,9 +182,22 @@ void main()
 		parado = 1.0 - smoothstep(0.004, 0.03, mudanca);
 	}
 
-	// Interface: borda dura E imovel. Uma coisa so nao basta -- textura fina
-	// tambem tem borda dura, e ceu tambem fica parado.
-	float interface_ = smoothstep(0.05, 0.16, fino) * parado;
+	// Interface: borda dura, imovel, E isolada. Duas coisas nao bastam -- uma
+	// arma em primeiro plano num FPS tambem tem borda dura (metal, textura) e
+	// mal se mexe em relacao a tela (ela acompanha a camera, so balanca um
+	// pouco), entao batia nos dois primeiros criterios e era achatada de volta
+	// pro plano de convergencia junto com o HUD de verdade -- o defeito
+	// relatado de "a arma nao se destaca em primeiro plano".
+	//
+	// O que falta e "isolado": um icone ou uma letra de HUD e uma mancha
+	// pequena cercada de fundo mais liso -- o detalhe NAO se estende por uma
+	// area larga ao redor. Uma arma (ou qualquer objeto 3D grande) tem
+	// detalhe tanto de perto (fino, um texel) quanto numa amostra larga
+	// (detalhe, 6-10 texels) porque ela ocupa uma region contigua da tela.
+	// "detalhe" alto reduz a chance de ser interface, mesmo com fino e parado
+	// altos tambem.
+	float isolado = 1.0 - smoothstep(0.03, 0.12, detalhe);
+	float interface_ = smoothstep(0.05, 0.16, fino) * parado * isolado;
 	d = mix(d, uConvergence, interface_ * 0.9);
 
 	if(uHasPrev == 1)

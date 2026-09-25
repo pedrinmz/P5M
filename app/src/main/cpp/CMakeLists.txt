@@ -24,29 +24,24 @@ add_library(p5m-vr SHARED
         neural_depth.cpp
         xr_session.cpp)
 
-# -- 3D neural -------------------------------------------------------------
+# -- 3D neural (pausado) ----------------------------------------------------
 #
 # neural_depth.cpp compila e funciona sem isto -- P5M_WITH_NEURAL_DEPTH so
 # liga quando <tensorflow/lite/c/c_api.h> existe (ver o __has_include no topo
 # de neural_depth.h), e sem ele a classe inteira vira no-ops e o 3D fica na
-# estimativa heuristica. As duas dependencias ja estao no app/build.gradle;
-# o find_package abaixo as acha via prefab (o AAR do TFLite publica prefab
-# desde a versao 2.9), desde que o Gradle ja tenha resolvido a dependencia ao
-# menos uma vez -- o que acontece sozinho no primeiro sync do projeto.
+# estimativa heuristica, que e onde estamos agora de proposito.
 #
-# Se o find_package falhar (mensagem tipo "tensorflowlite_c not found"),
-# quase sempre e o Gradle ainda nao ter baixado o AAR -- sincronize o projeto
-# no Android Studio (o siningo de elefante/reload) e rode de novo antes de
-# desconfiar de outra coisa.
-#
-# Se preferir o delegate QNN (Hexagon) em vez do de GPU -- melhor eficiencia
-# energetica em sessoes longas no Quest 3 standalone, ao custo de mais setup
-# -- troque pelo Qualcomm AI Engine Direct SDK e ajuste os includes em
-# neural_depth.cpp de acordo; o resto da ponte (thread, fila de quadros,
-# textura de resultado) não muda.
-find_package(tensorflowlite_c REQUIRED CONFIG)
-find_package(tensorflowlite_gpu REQUIRED CONFIG)
-
+# find_package(tensorflowlite_c ...) ficava aqui, REQUIRED. Voltou a ficar de
+# fora: o AAR oficial do TFLite (org.tensorflow:tensorflow-lite) nao publica
+# um pacote CMake utilizavel por find_package via prefab -- e uma lacuna
+# conhecida e sem solucao oficial (ver as issues abertas no repositorio do
+# tensorflow sobre "prefab" + "tensorflowlite_c", 2023 em diante). Exigir
+# aqui derrubava o build inteiro por causa de uma peca que nunca ia se
+# encaixar assim. Quando isso for retomado, o caminho provavel nao e mais
+# find_package: e rodar a inferencia do lado Kotlin (via
+# org.tensorflow.lite.Interpreter, o caminho realmente suportado) e so trocar
+# dados com o C++ por JNI -- reaproveitando a fila de quadros e a textura de
+# resultado que ja existem aqui, so a chamada ao interpretador muda de lado.
 target_include_directories(p5m-vr PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
 find_library(ANDROID_LIB_LOG log)
