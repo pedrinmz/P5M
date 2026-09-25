@@ -54,8 +54,6 @@ find_library(ANDROID_LIB_JNIGRAPHICS jnigraphics)
 
 target_link_libraries(p5m-vr
         OpenXR::openxr_loader
-        tensorflowlite_c::tensorflowlite_c
-        tensorflowlite_gpu::tensorflowlite_gpu_delegate
         "${ANDROID_LIB_LOG}"
         "${ANDROID_LIB_ANDROID}"
         "${ANDROID_LIB_EGL}"
